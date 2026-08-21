@@ -5,7 +5,14 @@ import random
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram.ext import (
+    Application, 
+    CommandHandler, 
+    ContextTypes, 
+    CallbackQueryHandler,
+    MessageHandler,
+    filters
+)
 
 # ==================== CONFIGURATION ====================
 TOKEN = os.environ.get("BOT_TOKEN")
@@ -185,7 +192,6 @@ EVENTS = {
 }
 
 # ==================== USER DATA ====================
-user_subscriptions: Dict[int, List[str]] = {}
 subscribed_chats: List[int] = []
 
 # ==================== BOT COMMANDS ====================
@@ -303,13 +309,12 @@ async def upcoming_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def country_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Search events by country"""
-    # Get unique countries
     countries = set()
     for month_events in EVENTS.values():
         for event in month_events:
             countries.add(event["country"])
     
-    countries = sorted(list(countries))[:20]  # Limit to 20 for display
+    countries = sorted(list(countries))[:20]
     
     message = "🌍 **Browse Events by Country**\n\nSend the country name to see events.\n\nExample: `Nigeria`, `USA`, `India`\n\n**Available countries:**\n"
     message += "• " + "\n• ".join(countries[:15])
@@ -321,7 +326,6 @@ async def handle_country_search(update: Update, context: ContextTypes.DEFAULT_TY
     """Handle country search from text input"""
     query = update.message.text.strip()
     
-    # Find events for the country
     found_events = []
     for month, month_events in EVENTS.items():
         for event in month_events:
@@ -507,6 +511,43 @@ What would you like to do?
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=reply_markup)
 
+# ==================== HELPER: Handle Text Input ====================
+async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle text input for country/category search"""
+    text = update.message.text.strip()
+    
+    # Check if it looks like a country search
+    countries = set()
+    for month_events in EVENTS.values():
+        for event in month_events:
+            countries.add(event["country"].lower())
+    
+    if text.lower() in countries:
+        await handle_country_search(update, context)
+        return
+    
+    # Check if it looks like a category search
+    categories = set()
+    for month_events in EVENTS.values():
+        for event in month_events:
+            categories.add(event["category"].lower())
+    
+    if any(text.lower() in cat for cat in categories):
+        await handle_category_search(update, context)
+        return
+    
+    # If not recognized, suggest commands
+    await update.message.reply_text(
+        "❓ **Command not recognized.**\n\n"
+        "Try:\n"
+        "• /today - Today's events\n"
+        "• /upcoming - Upcoming events\n"
+        "• /country - Search by country\n"
+        "• /category - Browse by category\n"
+        "• /help - All commands",
+        parse_mode="Markdown"
+    )
+
 # ==================== AUTO-UPDATE JOB ====================
 async def send_daily_updates(context: ContextTypes.DEFAULT_TYPE):
     """Send daily event updates to subscribers"""
@@ -536,7 +577,7 @@ async def send_daily_updates(context: ContextTypes.DEFAULT_TYPE):
                 text=message,
                 parse_mode="Markdown"
             )
-            await asyncio.sleep(0.5)  # Rate limiting
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Error sending to {chat_id}: {e}")
 
@@ -576,7 +617,6 @@ async def main():
     # Setup job queue for daily updates
     job_queue = application.job_queue
     if job_queue:
-        # Schedule daily updates at 8:00 AM
         job_queue.run_daily(
             send_daily_updates,
             time=datetime.strptime("08:00", "%H:%M").time(),
@@ -602,43 +642,6 @@ async def main():
     while True:
         await asyncio.sleep(3600)
         logger.info(f"📊 Status: {len(subscribed_chats)} subscribers")
-
-# ==================== HELPER: Handle Text Input ====================
-async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle text input for country/category search"""
-    text = update.message.text.strip()
-    
-    # Check if it looks like a country search
-    countries = set()
-    for month_events in EVENTS.values():
-        for event in month_events:
-            countries.add(event["country"].lower())
-    
-    if text.lower() in countries:
-        await handle_country_search(update, context)
-        return
-    
-    # Check if it looks like a category search
-    categories = set()
-    for month_events in EVENTS.values():
-        for event in month_events:
-            categories.add(event["category"].lower())
-    
-    if any(text.lower() in cat for cat in categories):
-        await handle_category_search(update, context)
-        return
-    
-    # If not recognized, suggest commands
-    await update.message.reply_text(
-        "❓ **Command not recognized.**\n\n"
-        "Try:\n"
-        "• /today - Today's events\n"
-        "• /upcoming - Upcoming events\n"
-        "• /country - Search by country\n"
-        "• /category - Browse by category\n"
-        "• /help - All commands",
-        parse_mode="Markdown"
-    )
 
 # ==================== ENTRY POINT ====================
 if __name__ == "__main__":
